@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
 import android.provider.Settings
+import android.service.controls.ControlsProviderService.TAG
 import android.util.Log
 import android.widget.Button
 import android.widget.Toast
@@ -21,12 +22,16 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import com.google.firebase.messaging.FirebaseMessaging
 import java.io.File
+import okhttp3.*
+import java.io.IOException
 
 class MainActivity : AppCompatActivity() {
     // 앱 기능을 위해 필요한 권한 목록
     private val REQUIRED_PERMISSIONS = arrayOf(
         Manifest.permission.CAMERA,
+        Manifest.permission.POST_NOTIFICATIONS,
     )
     // 권한 요청 구분을 위한 고유 식별 코드
     private val PERMISSION_REQUEST_CODE = 100
@@ -50,7 +55,7 @@ class MainActivity : AppCompatActivity() {
             v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
             insets
         }
-
+        
         // 앱에서 필요한 권한을 확인 후 요청한다.
         if (!hasAllPermissions()) {
             // 권한이 없는 권한에 대해 요청 수행
@@ -59,7 +64,9 @@ class MainActivity : AppCompatActivity() {
 
         // 기능에 필요한 런처들을 초기화
         initActivityResultLaunchers()
-
+        // FCM을 위한 초기화
+        initFirebaseMessaging()
+        
         // 카메라 버튼을 찾은 후 기능 처리
         findViewById<Button>(R.id.camera).setOnClickListener {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
@@ -79,6 +86,17 @@ class MainActivity : AppCompatActivity() {
                     startActivity(intent)
                 }
             }
+        }
+    }
+
+    /** FCM 초기화 */
+    private fun initFirebaseMessaging() {
+        FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+            if (!task.isSuccessful) {
+                Log.w(TAG, "Fetching FCM registration token failed", task.exception)
+                return@addOnCompleteListener
+            }
+            val token = task.result
         }
     }
 

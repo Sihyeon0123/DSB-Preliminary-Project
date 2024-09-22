@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "413463664957",
+    "project_id": "push-app-6ba30",
+    "storage_bucket": "push-app-6ba30.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:413463664957:android:23604eb6165d7a65db0d54",
+        "android_client_info": {
+          "package_name": "com.example.pixsend"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAg17Quam47i-0L1SPe-g2yOJ983b-bht4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
