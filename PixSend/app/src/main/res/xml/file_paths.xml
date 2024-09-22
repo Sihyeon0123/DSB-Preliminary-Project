@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!--  카메라 촬영 후 파일을 저장하기 위해서 허용할 경로를 지정  -->
+    <external-path name="external_files" path="." />
+</paths>
