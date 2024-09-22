@@ -55,4 +55,6 @@ dependencies {
     implementation("com.google.firebase:firebase-analytics")
     // http 통신을 위해 추가
     implementation("com.squareup.okhttp3:okhttp:4.9.3")
+    // 이미지 처리 라이브러리
+    implementation("com.github.bumptech.glide:glide:4.15.1")
 }

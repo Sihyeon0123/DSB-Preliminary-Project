@@ -1,4 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<paths>
-    <external-path name="external_files" path="." /> <!-- 모든 외부 저장소 파일에 접근 -->
-</paths>

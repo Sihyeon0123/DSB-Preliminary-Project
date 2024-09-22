@@ -24,8 +24,8 @@ import okhttp3.Response
 import java.io.IOException
 
 class MyFirebaseMessagingService : FirebaseMessagingService() {
-    // 서버 주소
-    private val serverUrl = "http://10.0.2.2:8000/"
+    // Constants에서 서버 URL 불러오기
+    private val serverUrl = Constants.SERVER_URL
 
     companion object {
         private const val TAG = "FirebaseMessagingService"

@@ -5,6 +5,7 @@ from django.http import FileResponse
 from django.views.decorators.csrf import csrf_exempt
 import firebase_admin
 from firebase_admin import credentials, messaging
+from firebase_admin.messaging import UnregisteredError
 
 # Use the absolute path to the JSON file 
 json_path = os.path.abspath(os.path.join(settings.BASE_DIR, 'push-app-6ba30-firebase-adminsdk-foevy-d8d4ab739f.json'))
@@ -38,8 +39,8 @@ def upload_image(request):
             result_path = os.path.join(settings.MEDIA_ROOT, 'uploads', 'result.jpg')
 
             # 알림 보내기
-            for token in FCM_TOKENS:
-                send_fcm_message(token, '알림 제목', '새 이미지가 업로드되었습니다.')
+            for token in list(FCM_TOKENS):
+                send_fcm_message(token, '이미지 업로드 성공', '새 이미지가 업로드되었습니다.')
 
             return FileResponse(open(result_path, 'rb'), content_type='image/jpeg')
 
@@ -61,7 +62,6 @@ def add_token(request):
 
 
 def send_fcm_message(token, title, body):
-    print("알림전송")
     # 메시지 생성
     message = messaging.Message(
         notification=messaging.Notification(
@@ -71,6 +71,12 @@ def send_fcm_message(token, title, body):
         token=token,
     )
     
-    # 메시지 전송
-    response = messaging.send(message)
-    print('Successfully sent message:', response)
+    try:
+        # 메시지 전송
+        response = messaging.send(message)
+        print('알림 전송 성공:', response)
+    
+    except UnregisteredError:
+        print('토큰이 유효하지 않음. 삭제합니다.')
+        FCM_TOKENS.remove(token)
+        

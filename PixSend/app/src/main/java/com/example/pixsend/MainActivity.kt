@@ -1,6 +1,7 @@
 package com.example.pixsend
 
 import android.Manifest
+import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.MediaScannerConnection
@@ -9,9 +10,9 @@ import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
 import android.provider.Settings
-import android.service.controls.ControlsProviderService.TAG
 import android.util.Log
 import android.widget.Button
+import android.widget.ImageView
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.ActivityResultLauncher
@@ -22,12 +23,16 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
-import com.google.firebase.messaging.FirebaseMessaging
+import com.bumptech.glide.Glide
 import java.io.File
 import okhttp3.*
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import java.io.FileOutputStream
 import java.io.IOException
 
 class MainActivity : AppCompatActivity() {
+    // Constants에서 서버 URL 불러오기
+    private val serverUrl = Constants.SERVER_URL
     // 앱 기능을 위해 필요한 권한 목록
     private val REQUIRED_PERMISSIONS = arrayOf(
         Manifest.permission.CAMERA,
@@ -37,8 +42,12 @@ class MainActivity : AppCompatActivity() {
     private val PERMISSION_REQUEST_CODE = 100
     // 카메라 런처
     private lateinit var cameraLauncher: ActivityResultLauncher<Intent>
+    // 이미지 선택기 런처
+    private lateinit var photoPickerLauncher: ActivityResultLauncher<Intent>
     // 처리된 사진의 Uri를 저장할 변수
     private lateinit var photoURI: Uri
+    // 새로고침 경로
+    private lateinit var refreshURI: String
 
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -64,8 +73,6 @@ class MainActivity : AppCompatActivity() {
 
         // 기능에 필요한 런처들을 초기화
         initActivityResultLaunchers()
-        // FCM을 위한 초기화
-        initFirebaseMessaging()
         
         // 카메라 버튼을 찾은 후 기능 처리
         findViewById<Button>(R.id.camera).setOnClickListener {
@@ -87,16 +94,12 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
-    }
 
-    /** FCM 초기화 */
-    private fun initFirebaseMessaging() {
-        FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
-            if (!task.isSuccessful) {
-                Log.w(TAG, "Fetching FCM registration token failed", task.exception)
-                return@addOnCompleteListener
-            }
-            val token = task.result
+        // 이미지 선택 버튼 클릭 이벤트
+        findViewById<Button>(R.id.button_select_image).setOnClickListener {
+            // PhotoPicker 오픈
+            val intent = Intent(MediaStore.ACTION_PICK_IMAGES)
+            photoPickerLauncher.launch(intent)
         }
     }
 
@@ -119,8 +122,115 @@ class MainActivity : AppCompatActivity() {
         cameraLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             // 성공적으로 촬영이 끝난 경우
             if (result.resultCode == RESULT_OK) {
-                refreshGallery(photoURI.toString())
+                refreshGallery(refreshURI)
             }
+        }
+        
+        // 이미지 선택기
+        photoPickerLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == Activity.RESULT_OK) {
+                // 선택된 이미지 URI 처리
+                val selectedImageUri: Uri? = result.data?.data
+                // 선택된 이미지 처리 로직 설정
+                selectedImageUri?.let { uri ->
+                    uploadImageToServer(uri)
+                }
+            }
+        }
+    }
+
+    /**
+     * 선택한 이미지를 서버에 업로드하여 처리 결과를 받아온다
+     * @param imageUri 업로드할 이미지의 Uri
+     */
+    private fun uploadImageToServer(imageUri: Uri) {
+        // 선택된 이미지의 실제 경로 가져오기
+        val filePath = getRealPathFromURI(imageUri) // Uri에서 파일 경로를 가져옵니다.
+        val file = File(filePath) // 파일 객체를 생성합니다.
+
+        // OkHttp 클라이언트 설정
+        val client = OkHttpClient() // OkHttp 클라이언트를 생성합니다.
+        val mediaType = "image/jpeg".toMediaTypeOrNull() // 미디어 타입을 설정합니다.
+
+        // 멀티파트 요청 본체를 생성합니다.
+        val requestBody = MultipartBody.Builder()
+            .setType(MultipartBody.FORM) // 폼 데이터로 설정합니다.
+            .addFormDataPart("image", file.name, RequestBody.create(mediaType, file)) // 파일을 요청 본체에 추가합니다.
+            .build()
+
+        // 서버에 요청을 구성합니다.
+        val request = Request.Builder()
+            .url("$serverUrl/upload/") // 서버 URL을 설정합니다.
+            .post(requestBody) // POST 요청으로 설정합니다.
+            .build()
+
+        // 서버로 이미지 업로드 요청 보내기
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                // 요청 실패 시 로그에 오류 메시지를 기록합니다.
+                Log.e("Upload Error", e.message ?: "Error")
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                // 서버 응답이 성공적일 경우 처리합니다.
+                if (response.isSuccessful) {
+                    handleUploadResponse(response) // 응답 처리 함수 호출
+                } else {
+                    // 응답이 실패할 경우 로그에 오류 메시지를 기록합니다.
+                    Log.e("Upload Error", "Failed to upload image: ${response.code}")
+                }
+            }
+        })
+    }
+
+    /**
+     * Uri에서 실제 파일 경로를 가져오는 함수
+     * 주어진 Uri를 사용하여 해당 이미지 파일의 실제 경로를 반환합니다.
+     */
+    private fun getRealPathFromURI(uri: Uri): String? {
+        var realPath: String? = null
+        // contentResolver를 사용하여 Uri에 대한 쿼리를 수행합니다.
+        val cursor = contentResolver.query(uri, null, null, null, null)
+        cursor?.use {
+            // 쿼리 결과에서 첫 번째 행으로 이동합니다.
+            if (it.moveToFirst()) {
+                // DATA 열의 인덱스를 가져옵니다.
+                val idx = it.getColumnIndex(MediaStore.Images.Media.DATA)
+                // 인덱스가 유효하면 해당 경로를 가져옵니다.
+                realPath = if (idx != -1) it.getString(idx) else null
+            }
+        }
+        // 실제 경로를 반환합니다. 경로가 없으면 null을 반환합니다.
+        return realPath
+    }
+
+    /**
+     * 서버에서 이미지 업로드 응답을 처리하는 함수
+     * 서버의 응답을 통해 이미지를 다운로드하고 갤러리에 저장 후 화면에 표시합니다.
+     */
+    private fun handleUploadResponse(response: Response) {
+        val baseName = "result_image" // 기본 파일 이름
+        val extension = ".jpg" // 파일 확장자
+        val uniqueFileName = getUniqueFileName(baseName, extension) // 중복되지 않는 파일 이름 생성
+
+        // 지정된 디렉토리에 고유한 파일 이름으로 파일 객체 생성
+        val file = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "PixSend/$uniqueFileName")
+
+        // 응답의 바디에서 바이트 스트림을 가져와서 파일로 저장합니다.
+        response.body?.byteStream()?.use { inputStream ->
+            FileOutputStream(file).use { outputStream ->
+                // 입력 스트림에서 출력 스트림으로 데이터를 복사합니다.
+                inputStream.copyTo(outputStream)
+            }
+        }
+
+        // 갤러리를 새로 고칩니다. 저장된 파일의 경로를 사용합니다.
+        refreshGallery(file.absolutePath)
+
+        // UI 스레드에서 이미지 뷰에 이미지를 로드합니다.
+        runOnUiThread {
+            // Glide를 사용하여 이미지를 로드하고 ImageView에 표시합니다.
+            Glide.with(this).load(file).into(findViewById<ImageView>(R.id.imageView))
         }
     }
 
@@ -147,6 +257,7 @@ class MainActivity : AppCompatActivity() {
         val file = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "PixSend/$uniqueFileName")
         // 지정된 파일에 대한 콘텐츠 URI를 반환
         photoURI = FileProvider.getUriForFile(this, "${packageName}.provider", file)
+        refreshURI = file.absolutePath
 
         // Intent를 통해서 다른 컴포넌트(카메라)를 호출(MediaStore.ACTION_IMAGE_CAPTURE)한다.
         val cameraIntent = Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
