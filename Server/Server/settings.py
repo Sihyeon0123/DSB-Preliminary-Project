@@ -36,6 +36,8 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    # 모델 로드를 위한 
+    'Server.apps.MyAppConfig',
 ]
 
 MIDDLEWARE = [

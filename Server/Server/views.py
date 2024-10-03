@@ -6,6 +6,12 @@ from django.views.decorators.csrf import csrf_exempt
 import firebase_admin
 from firebase_admin import credentials, messaging
 from firebase_admin.messaging import UnregisteredError
+from django.apps import apps
+import cv2
+import numpy as np
+from detectron2.utils.visualizer import Visualizer
+from detectron2.data import MetadataCatalog
+from django.apps import apps 
 
 # Use the absolute path to the JSON file 
 json_path = os.path.abspath(os.path.join(settings.BASE_DIR, 'push-app-6ba30-firebase-adminsdk-foevy-d8d4ab739f.json'))
@@ -33,10 +39,14 @@ def upload_image(request):
                 for chunk in image_file.chunks():
                     destination.write(chunk)
 
-            # 이미지 처리로직 추가...
+            # 이미지 처리로직
+            input_image = cv2.imread(upload_path)  # 업로드한 이미지를 읽어옴
+            predictor = apps.get_app_config('Server')  # 초기화된 AppConfig 인스턴스 가져오기
+            processed_image = predictor.process_image(input_image)  # 예측 실행
 
             # 이미지 URL 생성
             result_path = os.path.join(settings.MEDIA_ROOT, 'uploads', 'result.jpg')
+            cv2.imwrite(result_path, processed_image)
 
             # 알림 보내기
             for token in list(FCM_TOKENS):
