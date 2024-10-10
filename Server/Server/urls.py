@@ -16,10 +16,11 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path
-from .views import upload_image, add_token
+from .views import upload_image, add_token, process_call
 
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("upload/", upload_image),
     path("addToken/", add_token),
+    path("call/", process_call),
 ]

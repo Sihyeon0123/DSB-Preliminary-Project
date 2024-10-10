@@ -42,11 +42,12 @@ def upload_image(request):
             # 이미지 처리로직
             input_image = cv2.imread(upload_path)  # 업로드한 이미지를 읽어옴
             predictor = apps.get_app_config('Server')  # 초기화된 AppConfig 인스턴스 가져오기
-            processed_image = predictor.process_image(input_image)  # 예측 실행
-
             # 이미지 URL 생성
             result_path = os.path.join(settings.MEDIA_ROOT, 'uploads', 'result.jpg')
-            cv2.imwrite(result_path, processed_image)
+            predictor.process_image_to_yolo(input_image, result_path)  # 예측 실행
+
+            # print(processed_image)
+            # cv2.imwrite(result_path, processed_image)
 
             # 알림 보내기
             for token in list(FCM_TOKENS):
@@ -70,6 +71,22 @@ def add_token(request):
             return JsonResponse({'error': 'Token not provided'}, status=400)
     return JsonResponse({'error': 'Invalid request'}, status=405)
 
+@csrf_exempt
+def process_call(request):
+    if request.method == 'POST':
+        try:
+            value = int(request.POST.get('value'))
+            if value == 1:
+                result = "쓰러짐"
+            elif value == 2:
+                result = "추락"
+                
+            for token in list(FCM_TOKENS):
+                send_fcm_message(token, result, result)
+            return JsonResponse({'result': result})
+        except:
+            return JsonResponse({'error': 'Invalid data'}, status=400)
+        
 
 def send_fcm_message(token, title, body):
     # 메시지 생성
