@@ -24,7 +24,7 @@ class MyAppConfig(AppConfig):
             return
         
         # YOLO모델 로드
-        self.yolo_model = YOLO(r"C:\Users\705-18\Documents\GitHub\DSB-Preliminary-Project\Server\weights\안전장비 가중치.pt")
+        self.yolo_model = YOLO(r"C:\Users\USER\Documents\GitHub\DSB-Preliminary-Project\Server\weights\안전장비 가중치.pt")
         print('YOLO모델이 성공적으로 로드되었습니다.')
         
         # # Detectron2 모델 로드

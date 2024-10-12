@@ -17,6 +17,7 @@ from sklearn.ensemble import RandomForestClassifier
 
 import copy
 import requests
+import io
 
 import warnings
 # 특정 UserWarning을 무시
@@ -76,7 +77,8 @@ if __name__ == '__main__':
     predictor = DefaultPredictor(cfg)
     print('Detectron2 모델 로드 성공')
 
-    df = pd.read_excel('t.xlsx')
+    # df = pd.read_excel('t.xlsx')
+    df = pd.read_excel(r'C:\Users\USER\Documents\GitHub\DSB-Preliminary-Project\SafeWatch\t.xlsx')
 
     X = df.drop(columns=['label'])  # 특징 (feature)
     y = df['label']   
@@ -110,8 +112,14 @@ if __name__ == '__main__':
             continue
         
         # Detectron2를 이용한 관절 검출
-        keypoints = predictor(frame)['instances'].get_fields()['pred_keypoints'][0]
-        
+        # keypoints = predictor(frame)['instances'].get_fields()['pred_keypoints'][0]
+
+        outputs = predictor(frame)
+        fields = outputs['instances'].get_fields()
+
+        keypoints = fields['pred_keypoints'][0]
+        bounding_boxes = fields['pred_boxes'][0]  # 바운딩 박스 좌표
+
         # 관절 각도 계산
         # 팔꿈치 각도
         elbow_angle = calculate_angle((int(keypoints[6][0]), int(keypoints[6][1])), (int(keypoints[8][0]), int(keypoints[8][1])), (int(keypoints[10][0]), int(keypoints[10][1])))  
@@ -160,9 +168,20 @@ if __name__ == '__main__':
             elif result == 2:
                 print('떨어짐')
                 data = {'value': 2}
-            if data != None:
-                response = requests.post(URL, data=data)
 
+            if data is not None:
+                # 바운딩 박스 좌표 가져오기
+                bbox = bounding_boxes.tensor.cpu().numpy().astype(int)[0]
+                # 바운딩 박스 그리기
+                cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), (0, 255, 0), 2)
+                
+                # 이미지를 메모리에 저장
+                _, buffer = cv2.imencode('.jpg', frame)
+                image_file = io.BytesIO(buffer)
+
+                # 이미지 파일을 서버에 전송
+                files = {'file': ('output_image_with_bbox.jpg', image_file, 'image/jpeg')}
+                response = requests.post(URL, data=data,  files=files)
                 if response.status_code == 200:
                     print('정상 전송')
                 else:

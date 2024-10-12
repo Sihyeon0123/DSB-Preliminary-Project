@@ -12,6 +12,7 @@ import numpy as np
 from detectron2.utils.visualizer import Visualizer
 from detectron2.data import MetadataCatalog
 from django.apps import apps 
+from django.http import HttpResponse
 
 # Use the absolute path to the JSON file 
 json_path = os.path.abspath(os.path.join(settings.BASE_DIR, 'push-app-6ba30-firebase-adminsdk-foevy-d8d4ab739f.json'))
@@ -80,23 +81,45 @@ def process_call(request):
                 result = "쓰러짐"
             elif value == 2:
                 result = "추락"
-                
+            
+            # 파일 가져오기
+            if 'file' in request.FILES:
+                uploaded_file = request.FILES['file']
+                file_path = os.path.join(settings.MEDIA_ROOT, 'uploads', uploaded_file.name)
+                # 파일 저장
+                with open(file_path, 'wb') as destination:
+                    for chunk in uploaded_file.chunks():
+                        destination.write(chunk)
+
+            # 알림 전송
             for token in list(FCM_TOKENS):
-                send_fcm_message(token, result, result)
+                print(uploaded_file.name, '작동됨')
+                send_fcm_message(token, result, result, uploaded_file.name)
             return JsonResponse({'result': result})
         except:
             return JsonResponse({'error': 'Invalid data'}, status=400)
         
 
-def send_fcm_message(token, title, body):
-    # 메시지 생성
-    message = messaging.Message(
-        notification=messaging.Notification(
-            title=title,
-            body=body,
-        ),
-        token=token,
-    )
+def send_fcm_message(token, title, body, image_url=None):
+    if image_url != None:
+        url = 'http://10.0.2.2:8000/images/' + image_url
+        # 메시지 생성
+        message = messaging.Message(
+            notification=messaging.Notification(
+                title=title,
+                body=body,
+                image=url
+            ),
+            token=token,
+        )
+    else:
+        message = messaging.Message(
+            notification=messaging.Notification(
+                title=title,
+                body=body,
+            ),
+            token=token,
+        )
     
     try:
         # 메시지 전송
@@ -107,3 +130,14 @@ def send_fcm_message(token, title, body):
         print('토큰이 유효하지 않음. 삭제합니다.')
         FCM_TOKENS.remove(token)
         
+
+def serve_image(request, filename):
+    # 이미지 파일 경로
+    file_path = os.path.join(settings.MEDIA_ROOT, 'uploads', filename)
+    
+    # 파일 존재 여부 확인
+    if os.path.exists(file_path):
+        with open(file_path, 'rb') as f:
+            return HttpResponse(f.read(), content_type="image/jpeg")
+    else:
+        return HttpResponse(status=404)

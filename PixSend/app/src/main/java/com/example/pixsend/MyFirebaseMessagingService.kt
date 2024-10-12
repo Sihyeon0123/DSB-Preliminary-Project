@@ -1,17 +1,27 @@
 package com.example.pixsend
 
+import android.app.DownloadManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.graphics.Bitmap
+import android.graphics.drawable.Drawable
+import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.work.OneTimeWorkRequest
 import androidx.work.WorkManager
 import androidx.work.Worker
 import androidx.work.WorkerParameters
+import com.bumptech.glide.Glide
+import com.bumptech.glide.request.target.CustomTarget
+import com.bumptech.glide.request.transition.Transition
 import com.google.firebase.messaging.FirebaseMessaging
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
@@ -84,6 +94,11 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             handleNow()
         }
 
+        val imageUrl = message.notification?.imageUrl?.toString()
+        if (imageUrl != null) {
+            downloadImage(this, imageUrl)
+        }
+
         //알람 내용이 비어 있지 않은 경우
         if (message.notification!= null) {
             setNotification(message)
@@ -115,7 +130,6 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         val channelId = "fcm_set_notification_channel" // 알림 채널 이름
         val channelName = "fcm_set_notification"
         val channelDescription = "fcm_send_notify"
-
         val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
 
         // 오레오 버전 이후에는 채널이 필요
@@ -144,6 +158,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
         val title: String? = message.notification?.title
         val body: String? = message.notification?.body
+        val imageUrl: String? = message.notification?.imageUrl?.toString()
 
         // 알림에 대한 UI 정보, 작업
         val notificationBuilder = NotificationCompat.Builder(this, channelId)
@@ -154,7 +169,23 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             .setAutoCancel(true) // 알람클릭시 삭제여부
             .setContentIntent(pendingIntent) // 알림 실행 시 Intent
 
-        notificationManager.notify(uniId, notificationBuilder.build())
+        // 이미지 URL이 있는 경우 처리
+        if (imageUrl != null) {
+            Glide.with(this)
+                .asBitmap()
+                .load(imageUrl)
+                .into(object : CustomTarget<Bitmap>() {
+                    override fun onResourceReady(resource: Bitmap, transition: Transition<in Bitmap>?) {
+                        notificationBuilder.setStyle(NotificationCompat.BigPictureStyle().bigPicture(resource))
+                        notificationManager.notify(uniId, notificationBuilder.build())
+                    }
+                    override fun onLoadCleared(placeholder: Drawable?) {
+                        // 이미지를 로드하는 동안 다른 작업을 할 수 있습니다.
+                    }
+                })
+        } else {
+            notificationManager.notify(uniId, notificationBuilder.build())
+        }
     }
 
     //필요한 곳 토큰 가져오기
@@ -172,5 +203,29 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         override fun doWork(): Result {
             return Result.success()
         }
+    }
+
+    // 이미지 URL을 다운로드하고 저장하는 함수
+    fun downloadImage(context: Context, imageUrl: String) {
+        val request = DownloadManager.Request(Uri.parse(imageUrl))
+            .setTitle("Image Download")
+            .setDescription("Downloading image from notification")
+            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            .setDestinationInExternalPublicDir(Environment.DIRECTORY_PICTURES, "downloaded_image.jpg")
+            .setAllowedOverMetered(true)
+            .setAllowedOverRoaming(true)
+
+        val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        val downloadId = downloadManager.enqueue(request)
+
+        // 다운로드 완료 여부를 확인하는 BroadcastReceiver 등록
+        context.registerReceiver(object : BroadcastReceiver() {
+            override fun onReceive(ctxt: Context?, intent: Intent?) {
+                val id = intent?.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1)
+                if (id == downloadId) {
+                    Log.d("DownloadStatus", "Download success: $id")
+                }
+            }
+        }, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE), RECEIVER_NOT_EXPORTED)
     }
 }
