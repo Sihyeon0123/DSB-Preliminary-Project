@@ -78,7 +78,7 @@ if __name__ == '__main__':
     print('Detectron2 모델 로드 성공')
 
     # df = pd.read_excel('t.xlsx')
-    df = pd.read_excel(r'C:\Users\USER\Documents\GitHub\DSB-Preliminary-Project\SafeWatch\t.xlsx')
+    df = pd.read_excel(r'.\SafeWatch\t.xlsx')
 
     X = df.drop(columns=['label'])  # 특징 (feature)
     y = df['label']   
@@ -91,7 +91,7 @@ if __name__ == '__main__':
     print('분류 모델 로드 성공')
 
     # 이미지들이 저장된 폴더 경로
-    image_folder = 'drop/'
+    image_folder = './SafeWatch/drop/'
 
     # 이미지 파일 목록을 불러오기
     image_files = sorted([f for f in os.listdir(image_folder) if f.endswith('.jpg') or f.endswith('.png')])
