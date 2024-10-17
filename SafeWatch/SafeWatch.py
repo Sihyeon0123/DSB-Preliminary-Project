@@ -22,7 +22,8 @@ import io
 import warnings
 # 특정 UserWarning을 무시
 warnings.filterwarnings("ignore", category=UserWarning)
-
+# yolo
+from ultralytics import YOLO
 
 def calculate_angle(point1, point2, point3):
     """
@@ -69,16 +70,21 @@ skeleton_connections = [
 if __name__ == '__main__':
     URL = "http://localhost:8000/call/"
 
-    cfg = get_cfg()
-    cfg.merge_from_file(model_zoo.get_config_file("COCO-Keypoints/keypoint_rcnn_R_50_FPN_3x.yaml"))
-    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.7  
-    cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url("COCO-Keypoints/keypoint_rcnn_R_50_FPN_3x.yaml")
-    cfg.MODEL.DEVICE='cuda' #만약 gpu를 사용한다면 ‘cuda’로 수정
-    predictor = DefaultPredictor(cfg)
-    print('Detectron2 모델 로드 성공')
+    # cfg = get_cfg()
+    # cfg.merge_from_file(model_zoo.get_config_file("COCO-Keypoints/keypoint_rcnn_R_50_FPN_3x.yaml"))
+    # cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.7  
+    # cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url("COCO-Keypoints/keypoint_rcnn_R_50_FPN_3x.yaml")
+    # cfg.MODEL.DEVICE='cuda' #만약 gpu를 사용한다면 ‘cuda’로 수정
+    # predictor = DefaultPredictor(cfg)
+    # print('Detectron2 모델 로드 성공')
+
+    yolo_model = YOLO(r".\weights\화재감지 가중치.pt")
+    
+    yolo_model2 = YOLO(r".\weights\안전장비 가중치.pt")
+    print('YOLO모델이 성공적으로 로드되었습니다.')
 
     # df = pd.read_excel('t.xlsx')
-    df = pd.read_excel(r'.\SafeWatch\t.xlsx')
+    df = pd.read_excel(r't.xlsx')
 
     X = df.drop(columns=['label'])  # 특징 (feature)
     y = df['label']   
@@ -91,7 +97,7 @@ if __name__ == '__main__':
     print('분류 모델 로드 성공')
 
     # 이미지들이 저장된 폴더 경로
-    image_folder = './SafeWatch/drop/'
+    image_folder = 'f/'
 
     # 이미지 파일 목록을 불러오기
     image_files = sorted([f for f in os.listdir(image_folder) if f.endswith('.jpg') or f.endswith('.png')])
@@ -114,53 +120,89 @@ if __name__ == '__main__':
         # Detectron2를 이용한 관절 검출
         # keypoints = predictor(frame)['instances'].get_fields()['pred_keypoints'][0]
 
-        outputs = predictor(frame)
-        fields = outputs['instances'].get_fields()
+        # 화재 검출
+        result = None
+        results = yolo_model.predict(frame)
+        cls_id_lst = []
+        for box in results[0].boxes:
+            cls_id_lst.append(int(box.cls))
+        cls_id_lst
+ 
+        if  0 in cls_id_lst or 1 in cls_id_lst:
+            for box in results[0].boxes:
+                # 클래스 이름과 신뢰도
+                class_id = int(box.cls)  # 클래스 ID
+                confidence = box.conf  # 신뢰도
+                x1, y1, x2, y2 = box.xyxy.tolist()[0]  # 바운딩 박스 좌표
 
-        keypoints = fields['pred_keypoints'][0]
-        bounding_boxes = fields['pred_boxes'][0]  # 바운딩 박스 좌표
+                # 바운딩 박스 그리기
+                cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 0, 255), 5)
+                if class_id == 0:
+                    name = 'fire'
+                else:
+                    name = 'smoke'
+                # 클래스 이름과 신뢰도 텍스트 그리기
 
-        # 관절 각도 계산
-        # 팔꿈치 각도
-        elbow_angle = calculate_angle((int(keypoints[6][0]), int(keypoints[6][1])), (int(keypoints[8][0]), int(keypoints[8][1])), (int(keypoints[10][0]), int(keypoints[10][1])))  
-        # 어깨 각도 
-        # 어깨 각도를 오른 팔꿈치-오른 어깨-왼쪽 어깨 에서 오른 팔꿈치-오른 어깨-오른 엉덩이로 바꿈
-        shoulder_angle = calculate_angle((int(keypoints[6][0]), int(keypoints[6][1])), (int(keypoints[8][0]), int(keypoints[8][1])), (int(keypoints[12][0]), int(keypoints[12][1]))) 
-        # 허리 각도 
-        hip_angle = calculate_angle((int(keypoints[6][0]), int(keypoints[6][1])), (int(keypoints[12][0]), int(keypoints[12][1])), (int(keypoints[13][0]), int(keypoints[13][1])))  
-        # 무릎 각도
-        knee_angle = calculate_angle((int(keypoints[12][0]), int(keypoints[12][1])), (int(keypoints[14][0]), int(keypoints[14][1])), (int(keypoints[16][0]), int(keypoints[16][1])))  
+                cv2.putText(frame, name, (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 3, (255, 255, 255), 5)
+            if 0 in cls_id_lst:
+                result = 3
+            else:
+                result = 4
 
-        # 높이(y) 추출
-        head_y = min_max_scale(int(keypoints[0][1]), 0, image_height)
-        hip_y = min_max_scale(int(keypoints[12][1]), 0, image_height)
-        ankle_y = min_max_scale(int(keypoints[16][1]), 0, image_height)
         
-        f_lst = [elbow_angle, shoulder_angle, hip_angle, knee_angle, head_y, hip_y, ankle_y]
+        if not result:
+            outputs = predictor(frame)
+            fields = outputs['instances'].get_fields()
 
+            keypoints = fields['pred_keypoints'][0]
+            bounding_boxes = fields['pred_boxes'][0]  # 바운딩 박스 좌표
 
-        # 프레임 카운트
-        if i < 5:
-            i += 1
-            for f in f_lst:
-                temp_que.append(f)
-        elif i <= 5:
-            temp_que = temp_que[7:]
-            for f in f_lst:
-                temp_que.append(f)
+            # 관절 각도 계산
+            # 팔꿈치 각도
+            elbow_angle = calculate_angle((int(keypoints[6][0]), int(keypoints[6][1])), (int(keypoints[8][0]), int(keypoints[8][1])), (int(keypoints[10][0]), int(keypoints[10][1])))  
+            # 어깨 각도 
+            # 어깨 각도를 오른 팔꿈치-오른 어깨-왼쪽 어깨 에서 오른 팔꿈치-오른 어깨-오른 엉덩이로 바꿈
+            shoulder_angle = calculate_angle((int(keypoints[6][0]), int(keypoints[6][1])), (int(keypoints[8][0]), int(keypoints[8][1])), (int(keypoints[12][0]), int(keypoints[12][1]))) 
+            # 허리 각도 
+            hip_angle = calculate_angle((int(keypoints[6][0]), int(keypoints[6][1])), (int(keypoints[12][0]), int(keypoints[12][1])), (int(keypoints[13][0]), int(keypoints[13][1])))  
+            # 무릎 각도
+            knee_angle = calculate_angle((int(keypoints[12][0]), int(keypoints[12][1])), (int(keypoints[14][0]), int(keypoints[14][1])), (int(keypoints[16][0]), int(keypoints[16][1])))  
 
-            temp_df = pd.DataFrame([temp_que], columns=['elbow_angle1', 'shoulder_angle1', 'hip_angle1', 'knee_angle1', 'head_y1', 'hip_y1', 'ankle_y1',
-                                                        'elbow_angle2', 'shoulder_angle2', 'hip_angle2', 'knee_angle2', 'head_y2', 'hip_y2', 'ankle_y2',
-                                                        'elbow_angle3', 'shoulder_angle3', 'hip_angle3', 'knee_angle3', 'head_y3', 'hip_y3', 'ankle_y3',
-                                                        'elbow_angle4', 'shoulder_angle4', 'hip_angle4', 'knee_angle4', 'head_y4', 'hip_y4', 'ankle_y4',
-                                                        'elbow_angle5', 'shoulder_angle5', 'hip_angle5', 'knee_angle5', 'head_y5', 'hip_y5', 'ankle_y5'])
+            # 높이(y) 추출
+            head_y = min_max_scale(int(keypoints[0][1]), 0, image_height)
+            hip_y = min_max_scale(int(keypoints[12][1]), 0, image_height)
+            ankle_y = min_max_scale(int(keypoints[16][1]), 0, image_height)
             
-            test_pred = model.predict(temp_df)
-            result= test_pred[0]
+            f_lst = [elbow_angle, shoulder_angle, hip_angle, knee_angle, head_y, hip_y, ankle_y]
 
-            # if result == 0:
-            #     print('정상')
-            #     data = {'value': 0}
+
+            # 프레임 카운트
+            if i < 5:
+                i += 1
+                for f in f_lst:
+                    temp_que.append(f)
+            elif i <= 5:
+                temp_que = temp_que[7:]
+                for f in f_lst:
+                    temp_que.append(f)
+
+                temp_df = pd.DataFrame([temp_que], columns=['elbow_angle1', 'shoulder_angle1', 'hip_angle1', 'knee_angle1', 'head_y1', 'hip_y1', 'ankle_y1',
+                                                            'elbow_angle2', 'shoulder_angle2', 'hip_angle2', 'knee_angle2', 'head_y2', 'hip_y2', 'ankle_y2',
+                                                            'elbow_angle3', 'shoulder_angle3', 'hip_angle3', 'knee_angle3', 'head_y3', 'hip_y3', 'ankle_y3',
+                                                            'elbow_angle4', 'shoulder_angle4', 'hip_angle4', 'knee_angle4', 'head_y4', 'hip_y4', 'ankle_y4',
+                                                            'elbow_angle5', 'shoulder_angle5', 'hip_angle5', 'knee_angle5', 'head_y5', 'hip_y5', 'ankle_y5'])
+                
+                test_pred = model.predict(temp_df)
+                result= test_pred[0]
+
+                # if result == 0:
+                #     print('정상')
+                #     data = {'value': 0}
+                # 바운딩 박스 좌표 가져오기
+                bbox = bounding_boxes.tensor.cpu().numpy().astype(int)[0]
+                # 바운딩 박스 그리기
+                cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), (0, 255, 0), 5)
+        else:
             data = None
             if result == 1:
                 print('쓰러짐')
@@ -168,13 +210,14 @@ if __name__ == '__main__':
             elif result == 2:
                 print('떨어짐')
                 data = {'value': 2}
+            elif result == 3:
+                print('불꽃')
+                data = {'value': 3}
+            elif result == 4:
+                print('연기')
+                data = {'value': 4}
 
             if data is not None:
-                # 바운딩 박스 좌표 가져오기
-                bbox = bounding_boxes.tensor.cpu().numpy().astype(int)[0]
-                # 바운딩 박스 그리기
-                cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), (0, 255, 0), 2)
-                
                 # 이미지를 메모리에 저장
                 _, buffer = cv2.imencode('.jpg', frame)
                 image_file = io.BytesIO(buffer)
@@ -186,4 +229,3 @@ if __name__ == '__main__':
                     print('정상 전송')
                 else:
                     print('실패')
-                break
