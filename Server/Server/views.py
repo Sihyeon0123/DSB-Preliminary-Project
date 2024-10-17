@@ -8,6 +8,7 @@ from firebase_admin import credentials, messaging
 from firebase_admin.messaging import UnregisteredError
 from django.apps import apps
 import cv2
+import json
 import numpy as np
 from detectron2.utils.visualizer import Visualizer
 from detectron2.data import MetadataCatalog
@@ -76,12 +77,33 @@ def add_token(request):
 def process_call(request):
     if request.method == 'POST':
         try:
-            value = int(request.POST.get('value'))
-            if value == 1:
-                result = "쓰러짐"
-            elif value == 2:
-                result = "추락"
-            
+            value = request.POST.getlist('value')  # getlist를 사용하여 리스트 형태로 받음
+            # 값이 문자열 형태일 경우 정수로 변환
+            value = [int(v) for v in value if v.isdigit()]  # 정수 변환
+            result = ''
+            index = 0
+            if 0 in value:
+                result = '화재'
+                index+=1
+            elif 1 in value:
+                if index >= 1:
+                    result += ', 추락'
+                else:
+                    result = '추락'
+                    index += 1
+            elif 2 in value:
+                if index >= 1:
+                    result += ', 화재'
+                else:
+                    result = '화재'
+                    index += 1
+            elif 3 in value:
+                if index >= 1:
+                    result += ', 안전장비 미착용'
+                else:
+                    result = '안전장비 미착용'
+            result += ' 상황이 발생하였습니다.'
+            print(result)
             # 파일 가져오기
             if 'file' in request.FILES:
                 uploaded_file = request.FILES['file']
@@ -93,7 +115,7 @@ def process_call(request):
 
             # 알림 전송
             for token in list(FCM_TOKENS):
-                print(uploaded_file.name, '작동됨')
+                print(uploaded_file.name, '알림을 전송합니다.')
                 send_fcm_message(token, result, result, uploaded_file.name)
             return JsonResponse({'result': result})
         except:

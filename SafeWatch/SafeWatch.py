@@ -1,29 +1,26 @@
-import detectron2
-# from detectron2.utils.logger import setup_logger
-# setup_logger()
 import numpy as np
 import os, json, cv2, random
-from detectron2 import model_zoo
-from detectron2.engine import DefaultPredictor
-from detectron2.config import get_cfg
-from detectron2.utils.visualizer import Visualizer, ColorMode
-from detectron2.data import MetadataCatalog, DatasetCatalog
-import matplotlib.pyplot as plt
-
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
-
 import copy
 import requests
 import io
-
+import threading
 import warnings
 # 특정 UserWarning을 무시
 warnings.filterwarnings("ignore", category=UserWarning)
-# yolo
+
+# YOLO 모델 
 from ultralytics import YOLO
+
+# Detectron2 모델
+from detectron2 import model_zoo
+from detectron2.engine import DefaultPredictor
+from detectron2.config import get_cfg
+
+# RandomForestClassifier 모델
+from sklearn.ensemble import RandomForestClassifier
+
 
 def calculate_angle(point1, point2, point3):
     """
@@ -66,166 +63,321 @@ skeleton_connections = [
             (12, 14), (14, 16)     # 오른쪽 엉덩이에서 무릎, 무릎에서 발목 연결
         ]
 
+def send_data_to_server(data, frame):
+    # 이미지를 메모리에 저장
+    _, buffer = cv2.imencode('.jpg', frame)
+    image_file = io.BytesIO(buffer)
+
+    # 이미지 파일을 서버에 전송
+    files = {'file': ('output_image_with_bbox.jpg', image_file, 'image/jpeg')}
+    
+    # 서버에 POST 요청 전송
+    response = requests.post(URL, data=data, files=files)
+    
+    # 응답 처리
+    if response.status_code == 200:
+        print('정상 전송')
+    else:
+        print('실패:', response.text)
+
+def calc_angle(keypoints, image_height):
+    # 관절 각도 계산
+    # 팔꿈치 각도
+    elbow_angle = calculate_angle((int(keypoints[6][0]), int(keypoints[6][1])), (int(keypoints[8][0]), int(keypoints[8][1])), (int(keypoints[10][0]), int(keypoints[10][1])))  
+    # 어깨 각도 
+    # 어깨 각도를 오른 팔꿈치-오른 어깨-왼쪽 어깨 에서 오른 팔꿈치-오른 어깨-오른 엉덩이로 바꿈
+    shoulder_angle = calculate_angle((int(keypoints[6][0]), int(keypoints[6][1])), (int(keypoints[8][0]), int(keypoints[8][1])), (int(keypoints[12][0]), int(keypoints[12][1]))) 
+    # 허리 각도 
+    hip_angle = calculate_angle((int(keypoints[6][0]), int(keypoints[6][1])), (int(keypoints[12][0]), int(keypoints[12][1])), (int(keypoints[13][0]), int(keypoints[13][1])))  
+    # 무릎 각도
+    knee_angle = calculate_angle((int(keypoints[12][0]), int(keypoints[12][1])), (int(keypoints[14][0]), int(keypoints[14][1])), (int(keypoints[16][0]), int(keypoints[16][1])))  
+
+    # 높이(y) 추출
+    head_y = min_max_scale(int(keypoints[0][1]), 0, image_height)
+    hip_y = min_max_scale(int(keypoints[12][1]), 0, image_height)
+    ankle_y = min_max_scale(int(keypoints[16][1]), 0, image_height)
+    
+    f_lst = [elbow_angle, shoulder_angle, hip_angle, knee_angle, head_y, hip_y, ankle_y]
+    return f_lst
+
 
 if __name__ == '__main__':
     URL = "http://localhost:8000/call/"
+    # folder_path = './no_helmet'
+    # folder_path = './no_safygear'   
+    folder_path = './drop'  
 
-    # cfg = get_cfg()
-    # cfg.merge_from_file(model_zoo.get_config_file("COCO-Keypoints/keypoint_rcnn_R_50_FPN_3x.yaml"))
-    # cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.7  
-    # cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url("COCO-Keypoints/keypoint_rcnn_R_50_FPN_3x.yaml")
-    # cfg.MODEL.DEVICE='cuda' #만약 gpu를 사용한다면 ‘cuda’로 수정
-    # predictor = DefaultPredictor(cfg)
-    # print('Detectron2 모델 로드 성공')
-
-    yolo_model = YOLO(r".\weights\화재감지 가중치.pt")
-    
-    yolo_model2 = YOLO(r".\weights\안전장비 가중치.pt")
+    # YOLO모델 로드
+    safety_model = YOLO(r".\weights\안전장비 가중치.pt")
+    fire_model = YOLO(r".\weights\화재감지 가중치.pt")
     print('YOLO모델이 성공적으로 로드되었습니다.')
 
-    # df = pd.read_excel('t.xlsx')
-    df = pd.read_excel(r't.xlsx')
+    cfg = get_cfg()
+    cfg.merge_from_file(model_zoo.get_config_file("COCO-Keypoints/keypoint_rcnn_R_50_FPN_3x.yaml"))
+    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.7  
+    cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url("COCO-Keypoints/keypoint_rcnn_R_50_FPN_3x.yaml")
+    cfg.MODEL.DEVICE='cuda' #만약 gpu를 사용한다면 ‘cuda’로 수정
+    fall_model = DefaultPredictor(cfg)
+    print('Detectron2 모델 로드 성공')
 
+    # 분류 모델 로드
+    df = pd.read_csv('안전사고 분류 가중치.csv')
     X = df.drop(columns=['label'])  # 특징 (feature)
     y = df['label']   
+    randomforest = RandomForestClassifier(n_estimators=100, random_state=42)
+    randomforest.fit(X, y)
+    print('RandomForest 로드 성공')
 
-    # 훈련 세트와 테스트 세트로 나누기
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1, random_state=42, stratify=y)
+    # 비디오가 있는 경로에서 이미지를 가져온다
+    image_files = [f for f in os.listdir(folder_path) if f.endswith(('.png', '.jpg', '.jpeg'))]
+    
+    # 이미지 파일이 있는지 확인
+    if not image_files:
+        print("이미지가 없습니다.")
+        exit()
 
-    model = RandomForestClassifier(n_estimators=100, random_state=42)
-    model.fit(X_train, y_train)
-    print('분류 모델 로드 성공')
+    # 불이나 연기가 몇번이나 감지되었는지 카운트
+    fire_frame_cnt = 0
+    # 화재 상태에서 연기가 몇번이나 감지 X인지 카운트
+    no_fire_frame_cnt = 0
+    # 화재상태임을 알림
+    fire_detection_state = False
+    # 화재 알림 유무
+    is_fire_notified = False
 
-    # 이미지들이 저장된 폴더 경로
-    image_folder = 'f/'
+    # 안전장비가 연속으로 잡히지 않은 경우
+    no_safety_gear_cnt = 0
+    # 안전장비 미착용 작업자가 있는 상태인지 유무
+    no_safety_gear_state = False
+    # 안전장비 미착용 유무 알림 여부
+    is_no_safety_gear_notified = False
 
-    # 이미지 파일 목록을 불러오기
-    image_files = sorted([f for f in os.listdir(image_folder) if f.endswith('.jpg') or f.endswith('.png')])
-
-    temp_que = []
+    # 안전사고 프레임 수
     i = 0
-    # 이미지 처리 루프
+    # 연속된 5프레임의 피처를 저장할 큐
+    frame_f_que = []
+    # 정상상태 카운터
+    normal_cnt = 0
+    # fall상태 카운터
+    fall_cnt = 0
+    # drop상태 카운터
+    drop_cnt = 0
+    # 이상상태 저장 변수
+    is_abnormal_state = False
+    # 이상상태 알림 전송 여부
+    is_abnormal_notified = False
+    # 이상상태 번호 0: 쓰러짐, 1: 추락
+    abnromal_num = 0
+
+    # 슬라이드쇼 시작
     for image_file in image_files:
-        # 이미지 경로 생성
-        image_path = os.path.join(image_folder, image_file)
-        # 이미지 읽어오기
-        frame = cv2.imread(image_path)
-        # 이미지 크기 가져오기
-        image_height, image_width, channels = frame.shape
+        # 이미지 읽기
+        image_path = os.path.join(folder_path, image_file)
+        frame = cv2.imread(image_path) 
         
+        # 이미지가 정상적으로 읽혔는지 확인
         if frame is None:
-            print(f"이미지 로드에 실패했습니다: {image_file}")
+            print(f"이미지를 불러올 수 없습니다: {image_path}")
             continue
         
-        # Detectron2를 이용한 관절 검출
-        # keypoints = predictor(frame)['instances'].get_fields()['pred_keypoints'][0]
+        # 이미지 크기 가져오기
+        image_height, _, _ = frame.shape
 
-        # 화재 검출
-        result = None
-        results = yolo_model.predict(frame)
-        cls_id_lst = []
-        for box in results[0].boxes:
-            cls_id_lst.append(int(box.cls))
-        cls_id_lst
- 
-        if  0 in cls_id_lst or 1 in cls_id_lst:
-            for box in results[0].boxes:
-                # 클래스 이름과 신뢰도
-                class_id = int(box.cls)  # 클래스 ID
-                confidence = box.conf  # 신뢰도
-                x1, y1, x2, y2 = box.xyxy.tolist()[0]  # 바운딩 박스 좌표
+        # 안전사고 감지
+        outputs = fall_model(frame)
 
+        # 사람이 존재한다면
+        if len(outputs['instances']) > 0:
+            fields = outputs['instances'].get_fields()
+            keypoints = fields['pred_keypoints'][0]
+            bounding_boxes = fields['pred_boxes'][0]  # 바운딩 박스 좌표
+
+            bbox = bounding_boxes.tensor.cpu().numpy().astype(int)[0]
+            # 바운딩 박스 그리기
+            cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), (255, 0, 0), 5)
+            # 각도 계산
+            f_lst = calc_angle(keypoints, image_height)
+
+            # 프레임 카운트
+            if i < 5:
+                cv2.putText(frame, 'normal', (bbox[0], bbox[1]-10), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 3)
+                i += 1
+                for f in f_lst:
+                    frame_f_que.append(f)
+            # 프레임이 5프레임 이상 모였다면
+            elif i >= 5:
+                frame_f_que = frame_f_que[7:]
+                for f in f_lst:
+                    frame_f_que.append(f)
+                    
+                # df로 변경
+                temp_df = pd.DataFrame([frame_f_que])
+                # 분류 수행
+                test_pred = randomforest.predict(temp_df)
+                pred = test_pred[0]
+                # 0 정상
+                # 1 쓰러짐
+                # 2 떨어짐
+
+                state = 'normal'
+                # 이상 상태가 아니라면
+                if not is_abnormal_state:
+                    # 현재 판단한 상태에 따라서 횟수 증가
+                    if pred == 1:
+                        fall_cnt += 1
+                    elif pred == 2:
+                        drop_cnt += 1
+                    else:
+                        normal_cnt += 1
+
+                    # 만약 사고 발생상태가 5회 이상이라면 이상상태 지정
+                    if fall_cnt >= 5:
+                        is_abnormal_state = True
+                        normal_cnt = 0
+                        abnromal_num = 0
+
+                    if drop_cnt >= 5:
+                        is_abnormal_state = True
+                        normal_cnt = 0
+                        abnromal_num = 1
+
+                    if normal_cnt >= 5:
+                        fall_cnt = 0
+                        drop_cnt = 0
+                        normal_cnt = 0
+                # 이상상태이지만 정상횟수가 5회 이상이라면
+                else:
+                    if normal_cnt >= 5:
+                        fall_cnt = 0
+                        drop_cnt = 0
+                        is_abnormal_notified = False
+                    if abnromal_num == 0:
+                        state = 'fall'
+                    else:
+                        state = 'drop'
+                cv2.putText(frame, state, (bbox[0], bbox[1]-10), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 3)
+
+        # 이미지 처리 로직
+        # 화재 탐지
+        fire_detection_results = fire_model.predict(image_path, verbose=False, conf=0.5)
+        fire_boxes = fire_detection_results[0].boxes if len(fire_detection_results) > 0 else None
+        # 탐지된 객체가 존재하는지 확인
+        if fire_boxes and len(fire_boxes) > 0:
+            # 탐지된 객체에 바운딩박스 그리기
+            for box in fire_boxes:
+                x1, y1, x2, y2 = box.xyxy.tolist()[0]
+                cls = int(box.cls)
                 # 바운딩 박스 그리기
                 cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 0, 255), 5)
-                if class_id == 0:
+                # 이름 그리기
+                if cls == 0:
                     name = 'fire'
                 else:
                     name = 'smoke'
                 # 클래스 이름과 신뢰도 텍스트 그리기
 
-                cv2.putText(frame, name, (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 3, (255, 255, 255), 5)
-            if 0 in cls_id_lst:
-                result = 3
-            else:
-                result = 4
-
-        
-        if not result:
-            outputs = predictor(frame)
-            fields = outputs['instances'].get_fields()
-
-            keypoints = fields['pred_keypoints'][0]
-            bounding_boxes = fields['pred_boxes'][0]  # 바운딩 박스 좌표
-
-            # 관절 각도 계산
-            # 팔꿈치 각도
-            elbow_angle = calculate_angle((int(keypoints[6][0]), int(keypoints[6][1])), (int(keypoints[8][0]), int(keypoints[8][1])), (int(keypoints[10][0]), int(keypoints[10][1])))  
-            # 어깨 각도 
-            # 어깨 각도를 오른 팔꿈치-오른 어깨-왼쪽 어깨 에서 오른 팔꿈치-오른 어깨-오른 엉덩이로 바꿈
-            shoulder_angle = calculate_angle((int(keypoints[6][0]), int(keypoints[6][1])), (int(keypoints[8][0]), int(keypoints[8][1])), (int(keypoints[12][0]), int(keypoints[12][1]))) 
-            # 허리 각도 
-            hip_angle = calculate_angle((int(keypoints[6][0]), int(keypoints[6][1])), (int(keypoints[12][0]), int(keypoints[12][1])), (int(keypoints[13][0]), int(keypoints[13][1])))  
-            # 무릎 각도
-            knee_angle = calculate_angle((int(keypoints[12][0]), int(keypoints[12][1])), (int(keypoints[14][0]), int(keypoints[14][1])), (int(keypoints[16][0]), int(keypoints[16][1])))  
-
-            # 높이(y) 추출
-            head_y = min_max_scale(int(keypoints[0][1]), 0, image_height)
-            hip_y = min_max_scale(int(keypoints[12][1]), 0, image_height)
-            ankle_y = min_max_scale(int(keypoints[16][1]), 0, image_height)
+                cv2.putText(frame, name, (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 3, (0, 0, 255), 2)
             
-            f_lst = [elbow_angle, shoulder_angle, hip_angle, knee_angle, head_y, hip_y, ankle_y]
+            # 화재가 아닌 상태에서 다섯번 이상 감지었다면
+            if fire_frame_cnt >= 5 and not fire_detection_state:
+                print('화재가 감지되었습니다.')
+                fire_detection_state = True
+            else:
+                # 화재가 감지되지 않은 상태라면
+                if not fire_detection_state:
+                    fire_frame_cnt += 1
+            #  화재 객체가 감지되면 카운트 초기화
+            no_fire_frame_cnt = 0
+
+        # 화재 상태에서 벗어나기 위한 조건문
+        if fire_detection_state:
+            fire_frame_cnt = 0
+            # 연속 5번 이상 화재가 감지되지 않으면 화재상태 해제
+            if no_fire_frame_cnt >= 5:
+                fire_detection_state = False
+                is_fire_notified = True
+                print('화재상태가 해제되었습니다.')
+            else:
+                no_fire_frame_cnt += 1
 
 
-            # 프레임 카운트
-            if i < 5:
-                i += 1
-                for f in f_lst:
-                    temp_que.append(f)
-            elif i <= 5:
-                temp_que = temp_que[7:]
-                for f in f_lst:
-                    temp_que.append(f)
+        # 안전장비 탐지
+        safety_gear_results = safety_model.predict(image_path, verbose=False, conf=0.5)
+        safety_gear_boxes = safety_gear_results[0].boxes if len(safety_gear_results) > 0 else None
+        # 탐지된 객체가 존재하는지 확인
+        if safety_gear_boxes and len(safety_gear_boxes) > 0:
+            # 탐지된 객체에 바운딩박스 그리기
+            for box in safety_gear_boxes:
+                x1, y1, x2, y2 = box.xyxy.tolist()[0]
+                cls = int(box.cls)
+                name = ''
+                if cls == 0:
+                    name = 'helmet'
+                elif cls == 1:
+                    name = 'belt'
+                elif cls == 2:
+                    name = 'no_helmet'
+                elif cls == 3:
+                    name = 'no_belt'
 
-                temp_df = pd.DataFrame([temp_que], columns=['elbow_angle1', 'shoulder_angle1', 'hip_angle1', 'knee_angle1', 'head_y1', 'hip_y1', 'ankle_y1',
-                                                            'elbow_angle2', 'shoulder_angle2', 'hip_angle2', 'knee_angle2', 'head_y2', 'hip_y2', 'ankle_y2',
-                                                            'elbow_angle3', 'shoulder_angle3', 'hip_angle3', 'knee_angle3', 'head_y3', 'hip_y3', 'ankle_y3',
-                                                            'elbow_angle4', 'shoulder_angle4', 'hip_angle4', 'knee_angle4', 'head_y4', 'hip_y4', 'ankle_y4',
-                                                            'elbow_angle5', 'shoulder_angle5', 'hip_angle5', 'knee_angle5', 'head_y5', 'hip_y5', 'ankle_y5'])
-                
-                test_pred = model.predict(temp_df)
-                result= test_pred[0]
-
-                # if result == 0:
-                #     print('정상')
-                #     data = {'value': 0}
-                # 바운딩 박스 좌표 가져오기
-                bbox = bounding_boxes.tensor.cpu().numpy().astype(int)[0]
                 # 바운딩 박스 그리기
-                cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), (0, 255, 0), 5)
-        else:
-            data = None
-            if result == 1:
-                print('쓰러짐')
-                data = {'value': 1}
-            elif result == 2:
-                print('떨어짐')
-                data = {'value': 2}
-            elif result == 3:
-                print('불꽃')
-                data = {'value': 3}
-            elif result == 4:
-                print('연기')
-                data = {'value': 4}
+                cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 5)
+                cv2.putText(frame, name, (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 3)
 
-            if data is not None:
-                # 이미지를 메모리에 저장
-                _, buffer = cv2.imencode('.jpg', frame)
-                image_file = io.BytesIO(buffer)
+            # 탐지된 객체 리스트 
+            detect_safety_gear_lst = safety_gear_boxes[0].cls.tolist()
+            # 안전모 미착용자가 있다면
+            if 2 in detect_safety_gear_lst or 3 in detect_safety_gear_lst:
+                no_safety_gear_cnt += 1
+            # 안전모와 안전대 둘다 잡혔다면
+            elif 0 in detect_safety_gear_lst and 1 in detect_safety_gear_lst\
+                and 2 not in detect_safety_gear_lst and 3 not in detect_safety_gear_lst\
+                and not no_safety_gear_state:
+                no_safety_gear_cnt = 0
+                no_safety_gear_state = False
+                is_no_safety_gear_notified = False
 
-                # 이미지 파일을 서버에 전송
-                files = {'file': ('output_image_with_bbox.jpg', image_file, 'image/jpeg')}
-                response = requests.post(URL, data=data,  files=files)
-                if response.status_code == 200:
-                    print('정상 전송')
-                else:
-                    print('실패')
+            # 만약 5번 연속으로 미착용자가 잡혔다면
+            if no_safety_gear_cnt >= 5 and not no_safety_gear_state:
+                print('미착용자가 발견되었습니다.')
+                no_safety_gear_state = True
+
+
+        # 결과 서버 전송
+        # 만약 안전장비 미착용자가 발견되고 알림을 전송하지 않았다면 or
+        # 만약 화재상태이고 알림을 전송하지 않았다면
+        # 0: 쓰러짐, 1: 추락, 2: 화재, 3: 안전장비 미착용
+        if (no_safety_gear_state and not is_no_safety_gear_notified) or (fire_detection_state and not is_fire_notified) or (is_abnormal_state and not is_abnormal_notified):
+            result_satate = []
+            # 안전사고 발생
+            if is_abnormal_state:
+                result_satate.append(abnromal_num)
+            is_abnormal_notified = True
+
+            # 화재 발생
+            if fire_detection_state:
+                result_satate.append(2)    
+            is_fire_notified = True
+
+            # 안전장비 미착용
+            if no_safety_gear_state:
+                result_satate.append(3)
+            is_no_safety_gear_notified = True
+
+            # 결과 생성
+            data = {'value': result_satate} 
+            print(data)
+            # 쓰레드 생성 및 시작
+            thread = threading.Thread(target=send_data_to_server, args=(data, frame))
+            thread.start()
+
+
+        # 이미지 출력
+        cv2.imshow('video', frame)
+
+        # 빠르게 이미지를 교체 (1ms)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    # 창 종료
+    cv2.destroyAllWindows()
