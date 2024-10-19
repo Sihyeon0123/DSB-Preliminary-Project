@@ -15,6 +15,8 @@ from ultralytics import YOLO
 # django
 from django.apps import AppConfig
 from PIL import Image, ImageDraw, ImageFont
+import logging
+logging.getLogger('torch').setLevel(logging.ERROR)
 
 class MyAppConfig(AppConfig):
     name = 'Server'
@@ -38,15 +40,15 @@ class MyAppConfig(AppConfig):
         # self.predictor = DefaultPredictor(self.cfg)
         # print("Detectron2 모델이 성공적으로 로드되었습니다.")
 
-    def process_image_to_yolo(self, image, save_path):
-        results = self.yolo_model.predict(image)
+    def process_image_to_yolo(self, image, save_path, a):
+        results = self.yolo_model.predict(image, verbose=False)
 
         # OpenCV 이미지를 Pillow 이미지로 변환
         image_pil = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
         draw = ImageDraw.Draw(image_pil)
 
         # 한글 폰트 로드 (Windows 기준, 경로 수정 필요)
-        font = ImageFont.truetype("malgun.ttf", 20)
+        font = ImageFont.truetype("malgunbd.ttf", 31)
 
         # 결과를 기반으로 바운딩 박스 그리기    
         for result in results:
@@ -56,19 +58,36 @@ class MyAppConfig(AppConfig):
             # 이미지에 바운딩 박스 그리기
             for i, box in enumerate(boxes):
                 x1, y1, x2, y2 = map(int, box)
-                if int(class_ids[i]) == 0:
-                    cls = '안전모'
-                elif int(class_ids[i]) == 1:
-                    cls = '안전대'
+                if a == 0:
+                    if int(class_ids[i]) == 0:
+                        cls = '안전모'
+                    elif int(class_ids[i]) == 1:
+                        cls = '안전대'
+                    else:
+                        cls = '미착용'
+                    # 바운딩 박스 그리기
+                    draw.rectangle([x1, y1, x2, y2], outline="blue", width=2)
+                    # 한글 텍스트 그리기
+                    label = f"{cls}"
+                    draw.text((x1 + 18, y1 - 35), label, font=font, fill=(0, 0, 255))
                 else:
-                    cls = '미착용'
-                    
-                # 바운딩 박스 그리기
-                draw.rectangle([x1, y1, x2, y2], outline="red", width=2)
+                    if int(class_ids[i]) == 0:
+                        cls = '미착용'
+                    elif int(class_ids[i]) == 1:
+                        cls = '안전대'
+                    if cls == '미착용':
+                         # 바운딩 박스 그리기
+                        draw.rectangle([x1, y1, x2, y2], outline="red", width=8)
+                        # 한글 텍스트 그리기
+                        label = f"{cls}"
+                        draw.text((x1, y1 - 35), label, font=font, fill=(255, 0, 0))
+                    else:
+                        # 바운딩 박스 그리기
+                        draw.rectangle([x1, y1, x2, y2], outline="blue", width=8)
+                        # 한글 텍스트 그리기
+                        label = f"{cls}"
+                        draw.text((x1, y1 - 35), label, font=font, fill=(0, 0, 255))
 
-                # 한글 텍스트 그리기
-                label = f"ID: {cls}"
-                draw.text((x1, y1 - 20), label, font=font, fill=(0, 0, 255))
 
          # Pillow 이미지를 다시 OpenCV 이미지로 변환
         processed_image = cv2.cvtColor(np.array(image_pil), cv2.COLOR_RGB2BGR)

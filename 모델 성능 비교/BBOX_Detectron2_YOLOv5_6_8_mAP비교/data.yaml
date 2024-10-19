@@ -1,0 +1,5 @@
+train: C:\Users\USER\Desktop\train\YOLO\dataset\images\train
+val: C:\Users\USER\Desktop\train\YOLO\dataset\images\val
+
+nc: 2
+names: ['fire', 'smoke']

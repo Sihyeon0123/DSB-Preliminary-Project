@@ -25,9 +25,10 @@ if not firebase_admin._apps:  # Firebase 앱이 이미 초기화되었는지 확
     firebase_admin.initialize_app(cred)
 
 FCM_TOKENS = set([])
-
+a = 0
 @csrf_exempt
 def upload_image(request):
+    global a
     if request.method == 'POST':
         image_file = request.FILES.get('image')
         if image_file:
@@ -46,28 +47,45 @@ def upload_image(request):
             predictor = apps.get_app_config('Server')  # 초기화된 AppConfig 인스턴스 가져오기
             # 이미지 URL 생성
             result_path = os.path.join(settings.MEDIA_ROOT, 'uploads', 'result.jpg')
-            predictor.process_image_to_yolo(input_image, result_path)  # 예측 실행
+            predictor.process_image_to_yolo(input_image, result_path, a)  # 예측 실행
 
             # print(processed_image)
             # cv2.imwrite(result_path, processed_image)
-
+            if a == 0:
+                message = '안전 장비 착용이 확인되었습니다.'
+            else:
+                message = '안전 장비 착용이 확인되지 않았습니다.'
+            a += 1
+            print(message)
             # 알림 보내기
             for token in list(FCM_TOKENS):
-                send_fcm_message(token, '이미지 업로드 성공', '새 이미지가 업로드되었습니다.')
-
+                send_fcm_message(token, message, message)
+            # result_path = r'C:\Users\USER\Documents\GitHub\DSB-Preliminary-Project\Server\media\uploads\1.jpg'    
             return FileResponse(open(result_path, 'rb'), content_type='image/jpeg')
 
     return JsonResponse({'error': 'Invalid request'}, status=400)
 
-
+f = True
 @csrf_exempt  # CSRF 검사를 비활성화하여 토큰 전송을 받을 수 있도록 함
 def add_token(request):
+    global f
+    if f:
+        f = False
+        # 이미지 처리로직
+        input_image = cv2.imread(r'C:\Users\USER\Documents\GitHub\DSB-Preliminary-Project\Server\media\uploads\1.jpg')  # 업로드한 이미지를 읽어옴
+        predictor = apps.get_app_config('Server')  # 초기화된 AppConfig 인스턴스 가져오기
+        # 이미지 URL 생성
+        result_path = os.path.join(settings.MEDIA_ROOT, 'uploads', 'result.jpg')
+        predictor.process_image_to_yolo(input_image, result_path, a)  # 예측 실행
     print(len(FCM_TOKENS))
+    print('\n\n\n\n\n\n\n\n\n\n\n\n\n\n')
     if request.method == 'POST':
         token = request.POST.get('token')
         if token:
             FCM_TOKENS.add(token)
-
+            print('\n\n\n\n\n\n\n\n\n\n\n\n\n\n')
+            print('\n\n\n\n\n\n\n\n\n\n\n\n\n\n')
+            print('\n\n\n\n\n\n\n\n\n\n\n\n\n\n')
             return JsonResponse({'message': 'Token received successfully!'}, status=201)
         else:
             return JsonResponse({'error': 'Token not provided'}, status=400)
@@ -146,7 +164,7 @@ def send_fcm_message(token, title, body, image_url=None):
     try:
         # 메시지 전송
         response = messaging.send(message)
-        print('알림 전송 성공:', response)
+        # print('알림 전송 성공:', response)
     
     except UnregisteredError:
         print('토큰이 유효하지 않음. 삭제합니다.')
