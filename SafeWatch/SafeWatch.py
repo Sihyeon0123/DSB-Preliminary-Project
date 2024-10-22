@@ -37,8 +37,11 @@ def calculate_angle(point1, point2, point3):
     magnitude1 = np.linalg.norm(vector1)
     magnitude2 = np.linalg.norm(vector2)
     
-    # 코사인 각도 계산
-    cos_angle = dot_product / (magnitude1 * magnitude2)
+    if magnitude1 == 0 or magnitude2 == 0:
+        cos_angle = 0
+    else:
+        # 코사인 각도 계산
+        cos_angle = dot_product / (magnitude1 * magnitude2)
     
     # 각도 (라디안) 계산
     angle_rad = np.arccos(cos_angle)
@@ -76,7 +79,7 @@ def send_data_to_server(data, frame):
     
     # 응답 처리
     if response.status_code == 200:
-        print('정상 전송')
+        print('알림이 전송되었습니다.')
     else:
         print('실패:', response.text)
 
@@ -103,25 +106,31 @@ def calc_angle(keypoints, image_height):
 
 if __name__ == '__main__':
     URL = "http://localhost:8000/call/"
-    # folder_path = './no_helmet'
-    # folder_path = './no_safygear'   
-    folder_path = './drop'  
+    # folder_path = './추락 영상'  
+    # folder_path = './추락X 영상'  
+    # folder_path = './안전장비 착용'  
+    # folder_path = './안전모 미착용' 
+    folder_path = './화재 발생'
+    # folder_path = './안전사고 영상' # 안전 
+    # folder_path = './안전장비 영상' # 
+    
+    start = None
 
     # YOLO모델 로드
-    safety_model = YOLO(r".\weights\안전장비 가중치.pt")
+    safety_model = YOLO(r".\weights\안전장비 가중치3.pt")
     fire_model = YOLO(r".\weights\화재감지 가중치.pt")
     print('YOLO모델이 성공적으로 로드되었습니다.')
 
     cfg = get_cfg()
     cfg.merge_from_file(model_zoo.get_config_file("COCO-Keypoints/keypoint_rcnn_R_50_FPN_3x.yaml"))
-    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.7  
+    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.5
     cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url("COCO-Keypoints/keypoint_rcnn_R_50_FPN_3x.yaml")
     cfg.MODEL.DEVICE='cuda' #만약 gpu를 사용한다면 ‘cuda’로 수정
     fall_model = DefaultPredictor(cfg)
     print('Detectron2 모델 로드 성공')
 
     # 분류 모델 로드
-    df = pd.read_csv('안전사고 분류 가중치.csv')
+    df = pd.read_csv('안전사고 분류 가중치2.csv')
     X = df.drop(columns=['label'])  # 특징 (feature)
     y = df['label']   
     randomforest = RandomForestClassifier(n_estimators=100, random_state=42)
@@ -169,12 +178,17 @@ if __name__ == '__main__':
     # 이상상태 번호 0: 쓰러짐, 1: 추락
     abnromal_num = 0
 
+    color = (255, 0, 0)
+    color2 = (0, 255, 0)
+    size = 1
+    size2 = 1
+
     # 슬라이드쇼 시작
     for image_file in image_files:
         # 이미지 읽기
         image_path = os.path.join(folder_path, image_file)
         frame = cv2.imread(image_path) 
-        
+
         # 이미지가 정상적으로 읽혔는지 확인
         if frame is None:
             print(f"이미지를 불러올 수 없습니다: {image_path}")
@@ -193,17 +207,17 @@ if __name__ == '__main__':
             bounding_boxes = fields['pred_boxes'][0]  # 바운딩 박스 좌표
 
             bbox = bounding_boxes.tensor.cpu().numpy().astype(int)[0]
-            # 바운딩 박스 그리기
-            cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), (255, 0, 0), 5)
             # 각도 계산
             f_lst = calc_angle(keypoints, image_height)
 
             # 프레임 카운트
             if i < 5:
-                cv2.putText(frame, 'normal', (bbox[0], bbox[1]-10), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 3)
+                cv2.putText(frame, 'normal', (bbox[0], bbox[1]-10), cv2.FONT_HERSHEY_SIMPLEX, size, color, 3)
                 i += 1
                 for f in f_lst:
                     frame_f_que.append(f)
+                 # 바운딩 박스 그리기
+                cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), color, 5)
             # 프레임이 5프레임 이상 모였다면
             elif i >= 5:
                 frame_f_que = frame_f_que[7:]
@@ -232,11 +246,15 @@ if __name__ == '__main__':
 
                     # 만약 사고 발생상태가 5회 이상이라면 이상상태 지정
                     if fall_cnt >= 5:
+                        color = (0, 0, 255)
+                        size = 3
                         is_abnormal_state = True
                         normal_cnt = 0
                         abnromal_num = 0
 
                     if drop_cnt >= 5:
+                        color = (0, 0, 255)
+                        size = 3
                         is_abnormal_state = True
                         normal_cnt = 0
                         abnromal_num = 1
@@ -246,16 +264,21 @@ if __name__ == '__main__':
                         drop_cnt = 0
                         normal_cnt = 0
                 # 이상상태이지만 정상횟수가 5회 이상이라면
-                else:
+                if is_abnormal_state:
                     if normal_cnt >= 5:
+                        color = (255, 0, 0)
+                        size = 1
                         fall_cnt = 0
                         drop_cnt = 0
                         is_abnormal_notified = False
                     if abnromal_num == 0:
                         state = 'fall'
                     else:
+                        color = (0, 0, 255)
                         state = 'drop'
-                cv2.putText(frame, state, (bbox[0], bbox[1]-10), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 3)
+                cv2.putText(frame, state, (bbox[0], bbox[1]-10), cv2.FONT_HERSHEY_SIMPLEX, size, color, 3)
+                # 바운딩 박스 그리기
+                cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), color, 5)
 
         # 이미지 처리 로직
         # 화재 탐지
@@ -276,7 +299,7 @@ if __name__ == '__main__':
                     name = 'smoke'
                 # 클래스 이름과 신뢰도 텍스트 그리기
 
-                cv2.putText(frame, name, (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 3, (0, 0, 255), 2)
+                cv2.putText(frame, name, (int(x1), int(y1) + 110), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
             
             # 화재가 아닌 상태에서 다섯번 이상 감지었다면
             if fire_frame_cnt >= 5 and not fire_detection_state:
@@ -313,16 +336,24 @@ if __name__ == '__main__':
                 name = ''
                 if cls == 0:
                     name = 'helmet'
+                    color2 = (0, 255, 0)
+                    size2 = 1
                 elif cls == 1:
                     name = 'belt'
+                    size2 = 1
+                    color2 = (0, 255, 0)
                 elif cls == 2:
                     name = 'no_helmet'
+                    size2 = 3
+                    color2 = (0, 0, 255)
                 elif cls == 3:
                     name = 'no_belt'
+                    size2 = 3
+                    color2 = (0, 0, 255)
 
                 # 바운딩 박스 그리기
-                cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 5)
-                cv2.putText(frame, name, (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 3)
+                cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), color2, 5)
+                cv2.putText(frame, name, (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, size2, color2, 3)
 
             # 탐지된 객체 리스트 
             detect_safety_gear_lst = safety_gear_boxes[0].cls.tolist()
@@ -366,18 +397,25 @@ if __name__ == '__main__':
 
             # 결과 생성
             data = {'value': result_satate} 
-            print(data)
             # 쓰레드 생성 및 시작
             thread = threading.Thread(target=send_data_to_server, args=(data, frame))
             thread.start()
 
 
         # 이미지 출력
-        cv2.imshow('video', frame)
+        resize_frame = cv2.resize(frame, (800, 480))
+        cv2.imshow('video', resize_frame)
 
         # 빠르게 이미지를 교체 (1ms)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
+        
+        while True:
+            if start is None:
+                start = input()
+            if start != None:
+                break
+            
 
     # 창 종료
     cv2.destroyAllWindows()

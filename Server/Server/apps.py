@@ -86,7 +86,7 @@ class MyAppConfig(AppConfig):
                         draw.rectangle([x1, y1, x2, y2], outline="blue", width=8)
                         # 한글 텍스트 그리기
                         label = f"{cls}"
-                        draw.text((x1, y1 - 35), label, font=font, fill=(0, 0, 255))
+                        draw.text((x1 + 10, y1 - 35), label, font=font, fill=(0, 0, 255))
 
 
          # Pillow 이미지를 다시 OpenCV 이미지로 변환

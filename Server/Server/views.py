@@ -72,7 +72,7 @@ def add_token(request):
     if f:
         f = False
         # 이미지 처리로직
-        input_image = cv2.imread(r'C:\Users\USER\Documents\GitHub\DSB-Preliminary-Project\Server\media\uploads\1.jpg')  # 업로드한 이미지를 읽어옴
+        input_image = cv2.imread(r'C:\Users\705-18\Documents\GitHub\DSB-Preliminary-Project\Server\media\uploads\1.jpg')  # 업로드한 이미지를 읽어옴
         predictor = apps.get_app_config('Server')  # 초기화된 AppConfig 인스턴스 가져오기
         # 이미지 URL 생성
         result_path = os.path.join(settings.MEDIA_ROOT, 'uploads', 'result.jpg')
