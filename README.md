@@ -63,7 +63,7 @@ AI 기반 영상 분석 기술을 도입하여 근로자의 안전사고, 화재
 ![image](https://github.com/user-attachments/assets/e6281f32-b141-4cf5-a308-97757d825b32)
 ![image](https://github.com/user-attachments/assets/1e74ba8d-b67f-49f9-9834-9ab3c6be0453)
 
-**실행 결과**: 불꽃이나 연기가 감지되는 경우 사진과 함께 알림이 전송된다.
+**실행 결과**: 사고가 감지되는 경우 사진과 함께 알림이 전송된다.
 ![3](https://github.com/user-attachments/assets/1b0be295-baa9-4a13-9b9b-73a758370566)
    
 **장점 및 기대효과**
